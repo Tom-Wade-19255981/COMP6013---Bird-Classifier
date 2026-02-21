@@ -1,5 +1,4 @@
-import sys, os
-from scipy.io import wavfile
+import os
 from librosa.filters import mel
 import librosa.display
 import numpy as np
@@ -7,16 +6,29 @@ import matplotlib.pyplot as plt
 
 from src.config import WAV_CHUNKS, SPECTROGRAMS, PREPROCESSED
 
-class WavController:
-    def __init__(self, file_path, chunk_length=3):
+class WavController():
+
+
+    def __init__(self, file_path=None, chunk_length=3):
         self.chunk_length = chunk_length
         self.file_path = file_path
         #self.sample_rate, self.audio_data = wavfile.read(file_path)
-        self.audio_data, self.sample_rate = librosa.load(file_path)
+        if file_path is not None: self.load_audio(file_path)
+        else: self.audio_data, self.sample_rate = None, None
+
         self.file_name = os.path.basename(file_path).split(".")[0] #[1]
 
+        #Spectrogram parameters, advised by Kahl, C. M. Wood, et al 2021
+        self.window_length = 512
+        self.num_mel_bands = 64
+        self.overlap = self.window_length//4
+        self.max_freq = 15000
+        self.min_freq = 150
 
-    def make_chunks(self):
+    def load_audio(self, file_path):
+        self.audio_data, self.sample_rate = librosa.load(file_path, mono=True, dtype=float)
+
+    def make_chunks(self, overlap=False):
         """
         Splits the wav file into chunks, overlapping each clip as to not miss start/end of a bird call.
 
@@ -34,17 +46,24 @@ class WavController:
         return chunks
 
     def create_spectrogram(self, chunk, save=False):
-        filter_banks = mel(n_fft=512, n_mels=64, sr=self.sample_rate)
+        
 
-        mel_spectrogram = librosa.feature.melspectrogram(y=chunk, sr=self.sample_rate, n_fft=512, n_mels=64, hop_length=128)
+        mel_spectrogram = librosa.feature.melspectrogram(
+            y=chunk, 
+            sr=self.sample_rate, 
+            n_fft=self.window_length, 
+            n_mels=self.num_mel_bands, 
+            hop_length=self.overlap,
+            fmin = self.min_freq,
+            fmax = self.max_freq
+        )
 
-        plt.figure(figsize=(50,20))
-        librosa.display.specshow(mel_spectrogram, sr=self.sample_rate)
-        plt.show()
 
         if save:
             pass
             #TODO: save specs
+
+        return mel_spectrogram
 
     def save_chunks(self, chunks):
         if not os.path.exists(WAV_CHUNKS / self.file_name):
@@ -52,14 +71,32 @@ class WavController:
 
         #TODO: probably not
 
-wav_controller = WavController(PREPROCESSED + "Weaveley_BIRD_HedgerowNorth_20240605_184000.WAV")
-chunks = wav_controller.make_chunks()
 
-wav_controller.create_spectrogram(chunks[102])
+if __name__ == "__main__":
+    wav_controller = WavController(PREPROCESSED + "Weaveley_BIRD_HedgerowNorth_20240605_184000.WAV")
+    chunks = wav_controller.make_chunks()
 
-# plt.figure(figsize=(20,5))
-# librosa.display.waveshow(wav_controller.audio_data, sr=wav_controller.sample_rate)
-# plt.title('Waveplot')
-# plt.xlabel('Time')
-# plt.ylabel('Amplitude')
-# plt.show()
+    y = chunks[100]
+
+    mel_spec = wav_controller.create_spectrogram(y)
+    mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
+
+    fig, ax = plt.subplots(3, 1, figsize=(25,20), constrained_layout=True)
+
+    librosa.display.waveshow(y, sr=wav_controller.sample_rate, ax=ax[0])
+    ax[0].set(title="Audio Waveform")
+    ax[0].set_ylabel("Amplitude")
+    ax[0].set_xlim(0,3)
+
+    ax[1].sharex(ax[2])
+    img = librosa.display.specshow(mel_spec, sr=wav_controller.sample_rate, x_axis="time", y_axis="mel", ax=ax[1])
+    ax[1].set(title="Mel Spectrogram (Linear)")
+    fig.colorbar(img, ax=ax[1])
+
+    img = librosa.display.specshow(mel_spec_db, sr=wav_controller.sample_rate, x_axis="time", y_axis="mel", ax=ax[2])
+    ax[2].set(title="Mel Spectrogram (Log dB)")
+
+    fig.colorbar(img, ax=ax[2], format="%+2.0f dB")
+
+    #plt.tight_layout()
+    plt.show()
